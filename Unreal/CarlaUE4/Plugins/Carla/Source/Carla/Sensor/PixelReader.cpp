@@ -92,7 +92,9 @@ TUniquePtr<TImagePixelData<FColor>> FPixelReader::DumpPixels(
 {
   const FIntPoint DestSize(RenderTarget.GetSurfaceWidth(), RenderTarget.GetSurfaceHeight());
   TUniquePtr<TImagePixelData<FColor>> PixelData = MakeUnique<TImagePixelData<FColor>>(DestSize);
-  if (!WritePixelsToArray(RenderTarget, PixelData->Pixels))
+  PixelData->Pixels.Shrink();
+  TArray<FColor> BitMap32(PixelData->Pixels.GetData(), PixelData->Pixels.Num());
+  if (!WritePixelsToArray(RenderTarget, BitMap32))
   {
     return nullptr;
   }
