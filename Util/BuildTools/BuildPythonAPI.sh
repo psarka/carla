@@ -84,7 +84,12 @@ if ${BUILD_PYTHONAPI} ; then
 
   log "Building Python API for Python 3."
 
-  /usr/bin/env python${PY_VERSION} setup.py bdist_egg
+  export CPLUS_INCLUDE_PATH="/usr/include/python${PYTHON_VERSION}/"
+  /usr/bin/env python${PYTHON_VERSION} -m pip install wheel
+  /usr/bin/env python${PYTHON_VERSION} setup.py bdist_wheel
+  for whl in dist/*.whl; do
+    auditwheel repair "$whl"
+  done
 
 fi
 

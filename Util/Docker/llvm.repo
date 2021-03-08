@@ -1,0 +1,7 @@
+[SCL-core]
+name=Springdale SCL Base $releasever - $basearch
+#mirrorlist=http://springdale.princeton.edu/data/springdale/SCL/$releasever/$basearch/mirrorlist
+baseurl=http://springdale.princeton.edu/data/springdale/SCL/$releasever/$basearch
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-springdale
+
