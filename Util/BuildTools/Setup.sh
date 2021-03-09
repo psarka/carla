@@ -8,16 +8,17 @@ DOC_STRING="Download and install the required libraries for carla."
 
 USAGE_STRING="Usage: $0 [--python-version=VERSION]"
 
-OPTS=`getopt -o h --long help,python-version: -n 'parse-options' -- "$@"`
+OPTS=`getopt -o h --long help,rebuild,clean,rss,python-version:,packages:,clean-intermediate,all,xml -n 'parse-options' -- "$@"`
+
+if [ $? != 0 ] ; then echo "$USAGE_STRING" ; exit 2 ; fi
 
 eval set -- "$OPTS"
 
-PY_VERSION_LIST=3
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --python-version )
-      PY_VERSION_LIST="$2";
+      echo '--python-version does nothing, use PYTHON_VERSION env variable';
       shift 2 ;;
     -h | --help )
       echo "$DOC_STRING"
@@ -43,9 +44,6 @@ export CC=/usr/bin/clang-8
 export CXX=/usr/bin/clang++-8
 
 source $(dirname "$0")/Environment.sh
-
-# Convert comma-separated string to array of unique elements.
-IFS="," read -r -a PY_VERSION_LIST <<< "${PY_VERSION_LIST}"
 
 mkdir -p ${CARLA_BUILD_FOLDER}
 pushd ${CARLA_BUILD_FOLDER} >/dev/null
@@ -107,83 +105,83 @@ BOOST_BASENAME="boost-${BOOST_VERSION}-${CXX_TAG}"
 BOOST_INCLUDE=${PWD}/${BOOST_BASENAME}-install/include
 BOOST_LIBPATH=${PWD}/${BOOST_BASENAME}-install/lib
 
-for PY_VERSION in ${PY_VERSION_LIST[@]} ; do
+SHOULD_BUILD_BOOST=true
 
-  SHOULD_BUILD_BOOST=true
-  PYTHON_VERSION=$(/usr/bin/env python${PY_VERSION} -V 2>&1)
-  LIB_NAME=${PYTHON_VERSION:7:3}
-  LIB_NAME=${LIB_NAME//.}
-  if [[ -d "${BOOST_BASENAME}-install" ]] ; then
-    if [ -f "${BOOST_BASENAME}-install/lib/libboost_python${LIB_NAME}.a" ] ; then
-      SHOULD_BUILD_BOOST=false
-      log "${BOOST_BASENAME} already installed."
-    fi
+[[ -z "$PYTHON_VERSION" ]] && { echo "Please set the PYTHON_VERSION" ; exit 1; }
+
+LIB_NAME=${PYTHON_VERSION:7:3}
+LIB_NAME=${LIB_NAME//.}
+if [[ -d "${BOOST_BASENAME}-install" ]] ; then
+  if [ -f "${BOOST_BASENAME}-install/lib/libboost_python${LIB_NAME}.a" ] ; then
+    SHOULD_BUILD_BOOST=false
+    log "${BOOST_BASENAME} already installed."
+  fi
+fi
+
+if { ${SHOULD_BUILD_BOOST} ; } ; then
+  rm -Rf ${BOOST_BASENAME}-source
+
+  BOOST_PACKAGE_BASENAME=boost_${BOOST_VERSION//./_}
+
+  log "Retrieving boost."
+  wget "https://dl.bintray.com/boostorg/release/${BOOST_VERSION}/source/${BOOST_PACKAGE_BASENAME}.tar.gz" || true
+  # try to use the backup boost we have in Jenkins
+  if [[ ! -f "${BOOST_PACKAGE_BASENAME}.tar.gz" ]] ; then
+    log "Using boost backup"
+    wget "https://carla-releases.s3.eu-west-3.amazonaws.com/Backup/${BOOST_PACKAGE_BASENAME}.tar.gz" || true
   fi
 
-  if { ${SHOULD_BUILD_BOOST} ; } ; then
-    rm -Rf ${BOOST_BASENAME}-source
+  log "Extracting boost for Python ${PYTHON_VERSION}."
+  tar -xzf ${BOOST_PACKAGE_BASENAME}.tar.gz
+  mkdir -p ${BOOST_BASENAME}-install/include
+  mv ${BOOST_PACKAGE_BASENAME} ${BOOST_BASENAME}-source
+  # Boost patch for exception handling
+  cp "${CARLA_BUILD_FOLDER}/../Util/BoostFiles/rational.hpp" "${BOOST_BASENAME}-source/boost/rational.hpp"
+  cp "${CARLA_BUILD_FOLDER}/../Util/BoostFiles/read.hpp" "${BOOST_BASENAME}-source/boost/geometry/io/wkt/read.hpp"
+  # ---
 
-    BOOST_PACKAGE_BASENAME=boost_${BOOST_VERSION//./_}
+  pushd ${BOOST_BASENAME}-source >/dev/null
 
-    log "Retrieving boost."
-    wget "https://dl.bintray.com/boostorg/release/${BOOST_VERSION}/source/${BOOST_PACKAGE_BASENAME}.tar.gz" || true
-    # try to use the backup boost we have in Jenkins
-    if [[ ! -f "${BOOST_PACKAGE_BASENAME}.tar.gz" ]] ; then
-      log "Using boost backup"
-      wget "https://carla-releases.s3.eu-west-3.amazonaws.com/Backup/${BOOST_PACKAGE_BASENAME}.tar.gz" || true
-    fi
+  BOOST_TOOLSET="clang-8.0"
+  BOOST_CFLAGS="-fPIC -std=c++14 -DBOOST_ERROR_CODE_HEADER_ONLY"
 
-    log "Extracting boost for Python ${PY_VERSION}."
-    tar -xzf ${BOOST_PACKAGE_BASENAME}.tar.gz
-    mkdir -p ${BOOST_BASENAME}-install/include
-    mv ${BOOST_PACKAGE_BASENAME} ${BOOST_BASENAME}-source
-    # Boost patch for exception handling
-    cp "${CARLA_BUILD_FOLDER}/../Util/BoostFiles/rational.hpp" "${BOOST_BASENAME}-source/boost/rational.hpp"
-    cp "${CARLA_BUILD_FOLDER}/../Util/BoostFiles/read.hpp" "${BOOST_BASENAME}-source/boost/geometry/io/wkt/read.hpp"
-    # ---
+  py3="/usr/bin/env python${PYTHON_VERSION}"
+  py3_root=`${py3} -c "import sys; print(sys.prefix)"`
+  pyv=`$py3 -c "import sys;x='{v[0]}.{v[1]}'.format(v=list(sys.version_info[:2]));sys.stdout.write(x)";`
+  export CPLUS_INCLUDE_PATH="/usr/include/python${PYTHON_VERSION}/"
 
-    pushd ${BOOST_BASENAME}-source >/dev/null
+  ./bootstrap.sh \
+      --with-toolset=clang \
+      --prefix=../boost-install \
+      --with-libraries=python,filesystem,system,program_options \
+      --with-python=${py3} --with-python-root=${py3_root}
 
-    BOOST_TOOLSET="clang-8.0"
-    BOOST_CFLAGS="-fPIC -std=c++14 -DBOOST_ERROR_CODE_HEADER_ONLY"
-
-    py3="/usr/bin/env python${PY_VERSION}"
-    py3_root=`${py3} -c "import sys; print(sys.prefix)"`
-    pyv=`$py3 -c "import sys;x='{v[0]}.{v[1]}'.format(v=list(sys.version_info[:2]));sys.stdout.write(x)";`
-    ./bootstrap.sh \
-        --with-toolset=clang \
-        --prefix=../boost-install \
-        --with-libraries=python,filesystem,system,program_options \
-        --with-python=${py3} --with-python-root=${py3_root}
-
-    if ${TRAVIS} ; then
-      echo "using python : ${pyv} : ${py3_root}/bin/python${PY_VERSION} ;" > ${HOME}/user-config.jam
-    else
-      echo "using python : ${pyv} : ${py3_root}/bin/python${PY_VERSION} ;" > project-config.jam
-    fi
-
-    ./b2 toolset="${BOOST_TOOLSET}" cxxflags="${BOOST_CFLAGS}" --prefix="../${BOOST_BASENAME}-install" -j ${CARLA_BUILD_CONCURRENCY} stage release
-    ./b2 toolset="${BOOST_TOOLSET}" cxxflags="${BOOST_CFLAGS}" --prefix="../${BOOST_BASENAME}-install" -j ${CARLA_BUILD_CONCURRENCY} install
-
-    popd >/dev/null
-
-    rm -Rf ${BOOST_BASENAME}-source
-    rm ${BOOST_PACKAGE_BASENAME}.tar.gz
-
-    # Boost patch for exception handling
-    cp "${CARLA_BUILD_FOLDER}/../Util/BoostFiles/rational.hpp" "${BOOST_BASENAME}-install/include/boost/rational.hpp"
-    cp "${CARLA_BUILD_FOLDER}/../Util/BoostFiles/read.hpp" "${BOOST_BASENAME}-install/include/boost/geometry/io/wkt/read.hpp"
-    # ---
-
-    # Install boost dependencies
-    mkdir -p "${LIBCARLA_INSTALL_CLIENT_FOLDER}/include/system"
-    mkdir -p "${LIBCARLA_INSTALL_CLIENT_FOLDER}/lib"
-    cp -rf ${BOOST_BASENAME}-install/include/* ${LIBCARLA_INSTALL_CLIENT_FOLDER}/include/system
-    cp -rf ${BOOST_BASENAME}-install/lib/* ${LIBCARLA_INSTALL_CLIENT_FOLDER}/lib
-
+  if ${TRAVIS} ; then
+    echo "using python : ${pyv} : ${py3_root}/bin/python${PYTHON_VERSION} ;" > ${HOME}/user-config.jam
+  else
+    echo "using python : ${pyv} : ${py3_root}/bin/python${PYTHON_VERSION} ;" > project-config.jam
   fi
 
-done
+  ./b2 toolset="${BOOST_TOOLSET}" cxxflags="${BOOST_CFLAGS}" --prefix="../${BOOST_BASENAME}-install" -j ${CARLA_BUILD_CONCURRENCY} stage release
+  ./b2 toolset="${BOOST_TOOLSET}" cxxflags="${BOOST_CFLAGS}" --prefix="../${BOOST_BASENAME}-install" -j ${CARLA_BUILD_CONCURRENCY} install
+
+  popd >/dev/null
+
+  rm -Rf ${BOOST_BASENAME}-source
+  rm ${BOOST_PACKAGE_BASENAME}.tar.gz
+
+  # Boost patch for exception handling
+  cp "${CARLA_BUILD_FOLDER}/../Util/BoostFiles/rational.hpp" "${BOOST_BASENAME}-install/include/boost/rational.hpp"
+  cp "${CARLA_BUILD_FOLDER}/../Util/BoostFiles/read.hpp" "${BOOST_BASENAME}-install/include/boost/geometry/io/wkt/read.hpp"
+  # ---
+
+  # Install boost dependencies
+  mkdir -p "${LIBCARLA_INSTALL_CLIENT_FOLDER}/include/system"
+  mkdir -p "${LIBCARLA_INSTALL_CLIENT_FOLDER}/lib"
+  cp -rf ${BOOST_BASENAME}-install/include/* ${LIBCARLA_INSTALL_CLIENT_FOLDER}/include/system
+  cp -rf ${BOOST_BASENAME}-install/lib/* ${LIBCARLA_INSTALL_CLIENT_FOLDER}/lib
+
+fi
 
 unset BOOST_BASENAME
 
@@ -263,9 +261,9 @@ GTEST_VERSION=1.8.1
 GTEST_BASENAME=gtest-${GTEST_VERSION}-${CXX_TAG}
 
 GTEST_LIBCXX_INCLUDE=${PWD}/${GTEST_BASENAME}-libcxx-install/include
-GTEST_LIBCXX_LIBPATH=${PWD}/${GTEST_BASENAME}-libcxx-install/lib
+GTEST_LIBCXX_LIBPATH=${PWD}/${GTEST_BASENAME}-libcxx-install/lib64
 GTEST_LIBSTDCXX_INCLUDE=${PWD}/${GTEST_BASENAME}-libstdcxx-install/include
-GTEST_LIBSTDCXX_LIBPATH=${PWD}/${GTEST_BASENAME}-libstdcxx-install/lib
+GTEST_LIBSTDCXX_LIBPATH=${PWD}/${GTEST_BASENAME}-libstdcxx-install/lib64
 
 if [[ -d "${GTEST_BASENAME}-libcxx-install" && -d "${GTEST_BASENAME}-libstdcxx-install" ]] ; then
   log "${GTEST_BASENAME} already installed."

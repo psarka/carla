@@ -79,7 +79,7 @@ execute_process(COMMAND ${PYTHON_EXECUTABLE} -c "import setuptools" RESULT_VARIA
 
 set(XERCES_PATH "../../Build/xerces-c-3.2.3-install")
 set(XercesC_INCLUDE_DIR "${XERCES_PATH}/include")
-set(XercesC_LIBRARY "${XERCES_PATH}/lib")
+set(XercesC_LIBRARY "${XERCES_PATH}/lib64")
 # Install xercesc
 file(GLOB XERCES_LIBS "${XercesC_LIBRARY}/*.*")
 install(FILES ${XERCES_LIBS} DESTINATION lib)
